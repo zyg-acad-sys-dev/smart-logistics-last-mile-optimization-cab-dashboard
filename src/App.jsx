@@ -149,122 +149,167 @@ function Sparkline({ values }) {
   );
 }
 
-function RouteCanvas({ scenarioKey, scenario }) {
-  const counts = scenario.bestScenarioDetail.vehicleCustomerCounts;
-  const widths = { '100': 620, '200': 720, '1000': 860 };
-  const heights = { '100': 280, '200': 320, '1000': 360 };
-  const viewWidth = widths[scenarioKey] || 720;
-  const viewHeight = heights[scenarioKey] || 320;
-  const centerX = viewWidth / 2;
-  const centerY = viewHeight * 0.54;
-  const ringRadius = scenarioKey === '1000' ? 126 : scenarioKey === '200' ? 114 : 102;
-  const activeCount = scenario.bestScenario.activeVehicles;
+export function RouteCanvas({ scenarioKey }) {
+  const option = useMemo(() => {
+    const orderCount = parseInt(scenarioKey, 10) || 100;
+    const depot = [50, 50]; 
 
-  const routes = counts.map((count, index) => {
-    const angle = (-Math.PI / 2) + index * (2 * Math.PI / counts.length);
-    const active = count > 0;
-    const magnitude = active ? ringRadius + Math.min(28, count * 0.14) : ringRadius * 0.42;
-    const controlOffset = scenarioKey === '1000' ? 42 : 28;
-    const endX = centerX + Math.cos(angle) * magnitude;
-    const endY = centerY + Math.sin(angle) * (magnitude * 0.84);
-    const ctrlX = centerX + Math.cos(angle) * (magnitude * 0.54 + controlOffset);
-    const ctrlY = centerY + Math.sin(angle) * (magnitude * 0.36);
-    const path = `M ${centerX} ${centerY} Q ${ctrlX} ${ctrlY} ${endX} ${endY}`;
-    const points = Array.from({ length: Math.max(4, Math.min(16, Math.round(count / 18))) }, (_, pointIndex) => {
-      const t = (pointIndex + 1) / (Math.max(4, Math.min(16, Math.round(count / 18))) + 1);
-      const px = (1 - t) * (1 - t) * centerX + 2 * (1 - t) * t * ctrlX + t * t * endX;
-      const py = (1 - t) * (1 - t) * centerY + 2 * (1 - t) * t * ctrlY + t * t * endY;
-      return { x: px, y: py };
+    // 使用高对比度的雷达/监控配色
+    const fleets = [
+      { id: 1, cx: 30, cy: 70, color: '#00e5ff' }, // 青色
+      { id: 2, cx: 75, cy: 80, color: '#00ffa3' }, // 荧光绿
+      { id: 3, cx: 80, cy: 30, color: '#ffcf2d' }, // 警告黄
+      { id: 4, cx: 25, cy: 25, color: '#ff3d71' }, // 红色
+      { id: 5, cx: 50, cy: 15, color: '#b388ff' }  // 紫色
+    ];
+
+    const scatterData = [];
+    const linesData = [];
+
+    const lineOpacity = orderCount >= 1000 ? 0.15 : 0.4;
+    const lineWidth = orderCount >= 1000 ? 0.8 : 1.5;
+    const nodeSize = orderCount >= 1000 ? 2 : 4;
+    const pointsPerFleet = Math.floor(orderCount / fleets.length);
+
+    // 核心算法：生成曼哈顿直角路径 (Manhattan Grid Path)
+    const getManhattanPath = (p1, p2) => {
+      // 随机决定是先横向走还是先纵向走，增加街道的错落感
+      const turnXFirst = Math.random() > 0.5;
+      if (turnXFirst) {
+        return [p1, [p2[0], p1[1]], p2];
+      } else {
+        return [p1, [p1[0], p2[1]], p2];
+      }
+    };
+
+    fleets.forEach(fleet => {
+      const nodes = [];
+      for (let i = 0; i < pointsPerFleet; i++) {
+        const px = fleet.cx + (Math.random() - 0.5) * 40;
+        const py = fleet.cy + (Math.random() - 0.5) * 40;
+        const boundedX = Math.max(5, Math.min(95, px));
+        const boundedY = Math.max(5, Math.min(95, py));
+        
+        nodes.push([boundedX, boundedY]);
+        scatterData.push({
+          value: [boundedX, boundedY],
+          itemStyle: { color: fleet.color, shadowBlur: 6, shadowColor: fleet.color }
+        });
+      }
+
+      nodes.sort((a, b) => {
+        const angleA = Math.atan2(a[1] - fleet.cy, a[0] - fleet.cx);
+        const angleB = Math.atan2(b[1] - fleet.cy, b[0] - fleet.cx);
+        return angleA - angleB;
+      });
+
+      let prevPoint = depot;
+      nodes.forEach(pt => {
+        linesData.push({
+          coords: getManhattanPath(prevPoint, pt), // 使用直角折线
+          lineStyle: { color: fleet.color, width: lineWidth, opacity: lineOpacity }
+        });
+        prevPoint = pt;
+      });
+      linesData.push({
+        coords: getManhattanPath(prevPoint, depot),
+        lineStyle: { color: fleet.color, width: lineWidth, opacity: lineOpacity }
+      });
     });
-    return {
-      index,
-      count,
-      active,
-      path,
-      endX,
-      endY,
-      points,
-      glowClass: index === 2 ? 'route-glow' : '',
-      animationDelay: `${index * 0.12}s`,
-      particleDelay: `${index * 0.22}s`,
-    };
-  });
 
-  const densityPoints = Array.from({ length: scenarioKey === '1000' ? 56 : scenarioKey === '200' ? 34 : 20 }, (_, i) => {
-    const angle = (i / (scenarioKey === '1000' ? 56 : scenarioKey === '200' ? 34 : 20)) * Math.PI * 2;
-    const radial = ringRadius * (0.68 + (i % 5) * 0.05);
     return {
-      x: centerX + Math.cos(angle) * radial,
-      y: centerY + Math.sin(angle) * radial * 0.8,
-      opacity: 0.22 + (i % 4) * 0.12,
-      size: 1.6 + (i % 3),
+      backgroundColor: 'transparent',
+      // 开启坐标系的网格线，模拟城市街道 Grid
+      xAxis: { 
+        show: true, min: 0, max: 100, 
+        axisLabel: { show: false }, axisTick: { show: false }, axisLine: { show: false },
+        splitLine: { show: true, lineStyle: { color: 'rgba(0, 229, 255, 0.05)', type: 'solid' } }
+      },
+      yAxis: { 
+        show: true, min: 0, max: 100, 
+        axisLabel: { show: false }, axisTick: { show: false }, axisLine: { show: false },
+        splitLine: { show: true, lineStyle: { color: 'rgba(0, 229, 255, 0.05)', type: 'solid' } }
+      },
+      animationDurationUpdate: 1200, 
+      series: [
+        // 图层 1：底层静态街道网格路线 (直角)
+        {
+          type: 'lines',
+          coordinateSystem: 'cartesian2d',
+          polyline: true, // 开启多段线模式 (关键！)
+          zlevel: 1,
+          data: linesData
+        },
+        // 图层 2：雷达扫描上的移动车辆 (粒子流沿直角移动)
+        {
+          type: 'lines',
+          coordinateSystem: 'cartesian2d',
+          polyline: true,
+          zlevel: 2,
+          lineStyle: { width: 0 }, 
+          effect: {
+            show: true,
+            period: 5,           
+            trailLength: 0.2,    
+            symbol: 'circle',
+            symbolSize: orderCount >= 1000 ? 2 : 4,
+            color: '#ffffff'     
+          },
+          data: linesData
+        },
+        // 图层 3：客户订单点 (雷达上的微小反射点)
+        {
+          type: 'scatter',
+          coordinateSystem: 'cartesian2d',
+          zlevel: 3,
+          symbolSize: nodeSize,
+          data: scatterData
+        },
+        // 图层 4：中心仓库 (雷达中心站)
+        {
+          type: 'effectScatter',
+          coordinateSystem: 'cartesian2d',
+          zlevel: 4,
+          rippleEffect: { brushType: 'stroke', scale: 5, period: 3 },
+          itemStyle: { color: '#ffffff', shadowBlur: 20, shadowColor: '#00e5ff' },
+          symbolSize: 10,
+          data: [depot]
+        }
+      ]
     };
-  });
+  }, [scenarioKey]); 
 
   return (
-    <div className="route-visual-shell">
-      <div className="route-visual-header">
-        <div>
-          <h3>Route Dynamics</h3>
-          <p>Illustrative route growth and controlled flow cues for communication.</p>
+    <div style={{ height: '100%', width: '100%', minHeight: '400px', position: 'relative', overflow: 'hidden', borderRadius: '12px' }}>
+      
+      {/* --- 雷达扫描背景特效 (CSS) --- */}
+      <div style={{
+        position: 'absolute', top: '50%', left: '50%', width: '150%', height: '150%',
+        marginLeft: '-75%', marginTop: '-75%', borderRadius: '50%', pointerEvents: 'none',
+        background: 'conic-gradient(from 0deg, transparent 70%, rgba(0, 229, 255, 0.15) 100%)',
+        animation: 'radar-spin 4s linear infinite', zIndex: 0
+      }} />
+      <style>{`
+        @keyframes radar-spin { 100% { transform: rotate(360deg); } }
+      `}</style>
+      {/* ----------------------------- */}
+
+      <ReactECharts 
+        option={option} 
+        style={{ height: '100%', width: '100%', zIndex: 1, position: 'relative' }} 
+        opts={{ renderer: 'canvas' }} 
+        notMerge={false} 
+      />
+
+      <div style={{ position: 'absolute', top: 15, left: 15, zIndex: 2, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', color: '#00ffa3', fontFamily: 'monospace', letterSpacing: '1px' }}>
+          <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#00ffa3', animation: 'pulse 1.5s infinite' }}></div>
+          Scenario View
         </div>
-        <div className="route-visual-badge">{activeCount} / 5 active vehicles</div>
-      </div>
-      <div className="route-visual-stage">
-        <div className="route-grid" />
-        <svg className="route-svg" viewBox={`0 0 ${viewWidth} ${viewHeight}`} preserveAspectRatio="xMidYMid meet">
-          <defs>
-            <linearGradient id="routeGradient" x1="0" x2="1" y1="0" y2="1">
-              <stop offset="0%" stopColor="rgba(124,231,255,0.96)" />
-              <stop offset="100%" stopColor="rgba(103,232,165,0.92)" />
-            </linearGradient>
-            <filter id="softGlow">
-              <feGaussianBlur stdDeviation="4" result="coloredBlur" />
-              <feMerge>
-                <feMergeNode in="coloredBlur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-          {densityPoints.map((point, index) => (
-            <circle
-              key={`bg-${index}`}
-              cx={point.x}
-              cy={point.y}
-              r={point.size}
-              fill="rgba(124,231,255,0.85)"
-              opacity={point.opacity}
-            />
-          ))}
-          {routes.map(route => (
-            <g key={route.index}>
-              <path
-                d={route.path}
-                className={`route-path ${route.active ? 'active' : 'inactive'} ${route.glowClass}`}
-                style={{ animationDelay: route.animationDelay }}
-                pathLength="1"
-                filter={route.active ? 'url(#softGlow)' : undefined}
-              />
-              {route.active ? (
-                <circle className="route-particle" r="4" fill="rgba(124,231,255,0.95)" style={{ animationDelay: route.particleDelay }}>
-                  <animateMotion dur={scenarioKey === '1000' ? '2.6s' : '2.2s'} repeatCount="indefinite" path={route.path} rotate="auto" />
-                </circle>
-              ) : null}
-              {route.points.map((point, pointIndex) => (
-                <circle key={`pt-${route.index}-${pointIndex}`} cx={point.x} cy={point.y} r={2.4} className={route.active ? 'customer-dot active' : 'customer-dot inactive'} />
-              ))}
-              <circle cx={route.endX} cy={route.endY} r={route.active ? 6 : 4} className={route.active ? 'route-end active' : 'route-end inactive'} />
-            </g>
-          ))}
-          <g>
-            <circle cx={centerX} cy={centerY} r="14" className="depot-core" />
-            <circle cx={centerX} cy={centerY} r="26" className="depot-ring" />
-            <text x={centerX} y={centerY + 4} textAnchor="middle" className="depot-label">Depot</text>
-          </g>
-        </svg>
-      </div>
-      <div className="route-visual-caption">
-        The animation is illustrative rather than street-level navigation. It is designed to communicate routing structure and scale-dependent complexity.
+        <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', fontFamily: 'monospace' }}>
+          Illustrative Manhattan-style route visualization<br/>
+          FLEET_UNITS: 5
+        </div>
       </div>
     </div>
   );
